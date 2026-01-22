@@ -1,0 +1,73 @@
+# --------------------
+# Dependencies
+# --------------------
+node_modules/
+
+# --------------------
+# Build output
+# --------------------
+dist/
+build/
+out/
+
+# --------------------
+# Environment files
+# --------------------
+.env
+.env.*
+!.env.example
+
+# --------------------
+# Logs
+# --------------------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# --------------------
+# Runtime data
+# --------------------
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# --------------------
+# Coverage / testing
+# --------------------
+coverage/
+.nyc_output/
+
+# --------------------
+# Cache
+# --------------------
+.cache/
+.eslintcache
+.tsbuildinfo
+
+# --------------------
+# Editor / OS
+# --------------------
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# --------------------
+# TypeScript
+# --------------------
+*.tsbuildinfo
+
+# --------------------
+# Optional: Docker
+# --------------------
+.docker/
+
+# --------------------
+# Optional: Misc
+# --------------------
+*.swp
