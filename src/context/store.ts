@@ -1,6 +1,9 @@
 // src/context/store.ts
 import type { ChatMessage } from '../ollama.js';
 import { SYSTEM_PROMPT } from '../ollama.js';
+import { dbWriteSafe } from '../db/client.js';
+import { dbCreateSession, dbUpdateLastSeen, dbMarkExpired, dbIncrementResetCount } from '../db/sessions.js';
+import { dbInsertMessage, dbMarkMessagesTrimmed } from '../db/messages.js';
 
 export type SessionId = string;
 
@@ -43,6 +46,14 @@ export function getOrCreateSession(sessionId: SessionId): SessionState {
 
   const created = newSession();
   sessions.set(sessionId, created);
+
+  // Persist new session to database
+  dbWriteSafe(() => {
+    dbCreateSession(sessionId, created.createdAt);
+    // Also persist the initial system message
+    dbInsertMessage(sessionId, 'system', SYSTEM_PROMPT, 0, created.createdAt);
+  }, 'getOrCreateSession');
+
   return created;
 }
 
@@ -56,24 +67,43 @@ export function getMessages(sessionId: SessionId): ChatMessage[] {
 
 export function addUserMessage(sessionId: SessionId, content: string) {
   const s = getOrCreateSession(sessionId);
+  const position = s.messages.length;
   s.messages.push({ role: 'user', content });
-  trimSession(s);
+  trimSession(s, sessionId);
+
+  // Persist to database
+  dbWriteSafe(() => {
+    dbInsertMessage(sessionId, 'user', content, position, now());
+    dbUpdateLastSeen(sessionId, s.lastSeenAt);
+  }, 'addUserMessage');
 }
 
 export function addAssistantMessage(sessionId: SessionId, content: string) {
   const s = getOrCreateSession(sessionId);
+  const position = s.messages.length;
   s.messages.push({ role: 'assistant', content });
-  trimSession(s);
+  trimSession(s, sessionId);
+
+  // Persist to database
+  dbWriteSafe(() => {
+    dbInsertMessage(sessionId, 'assistant', content, position, now());
+    dbUpdateLastSeen(sessionId, s.lastSeenAt);
+  }, 'addAssistantMessage');
 }
 
 /**
- * Clears a session’s conversation history but keeps the session alive.
+ * Clears a session's conversation history but keeps the session alive.
  * Useful if you add a "New chat" button on the frontend.
  */
 export function resetSession(sessionId: SessionId) {
   const s = getOrCreateSession(sessionId);
   s.messages = [{ role: 'system', content: SYSTEM_PROMPT }];
   s.lastSeenAt = now();
+
+  // Increment reset count in database (messages stay in DB for analytics)
+  dbWriteSafe(() => {
+    dbIncrementResetCount(sessionId);
+  }, 'resetSession');
 }
 
 /**
@@ -83,12 +113,21 @@ export function resetSession(sessionId: SessionId) {
 export function cleanupExpiredSessions(): { removed: number; remaining: number } {
   const t = now();
   let removed = 0;
+  const expiredIds: string[] = [];
 
   for (const [id, s] of sessions.entries()) {
     if (t - s.lastSeenAt > SESSION_TTL_MS) {
       sessions.delete(id);
+      expiredIds.push(id);
       removed += 1;
     }
+  }
+
+  // Mark expired sessions in database (they stay in DB for analytics)
+  if (expiredIds.length > 0) {
+    dbWriteSafe(() => {
+      dbMarkExpired(expiredIds, t);
+    }, 'cleanupExpiredSessions');
   }
 
   return { removed, remaining: sessions.size };
@@ -101,22 +140,33 @@ export function getSessionCount() {
   return sessions.size;
 }
 
-function trimSession(s: SessionState) {
+function trimSession(s: SessionState, sessionId: SessionId) {
   // 1) Ensure system message stays at the front
   if (s.messages.length === 0 || s.messages[0]?.role !== 'system') {
     s.messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
   }
 
+  const trimmedPositions: number[] = [];
+
   // 2) Trim by message count (never remove the system prompt)
   while (s.messages.length > MAX_MESSAGES) {
-    // remove the oldest non-system message
+    // remove the oldest non-system message (position 1)
+    trimmedPositions.push(1);
     s.messages.splice(1, 1);
   }
 
   // 3) Trim by approximate character count (keep system prompt + most recent)
   // This is a simple guardrail; token-based trimming can come later.
   while (totalChars(s.messages) > MAX_CHARS && s.messages.length > 2) {
+    trimmedPositions.push(1);
     s.messages.splice(1, 1);
+  }
+
+  // Mark trimmed messages in database
+  if (trimmedPositions.length > 0) {
+    dbWriteSafe(() => {
+      dbMarkMessagesTrimmed(sessionId, trimmedPositions);
+    }, 'trimSession');
   }
 }
 

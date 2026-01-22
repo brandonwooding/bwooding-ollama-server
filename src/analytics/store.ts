@@ -1,4 +1,7 @@
 // src/analytics/store.ts
+import { dbWriteSafe } from '../db/client.js';
+import { dbInsertTurnLog } from '../db/analytics.js';
+
 export type Role = 'user' | 'assistant';
 
 export type LoggedMessage = {
@@ -27,6 +30,11 @@ export function logTurn(turn: TurnLog) {
   const list = turnsBySession.get(turn.sessionId) ?? [];
   list.push(turn);
   turnsBySession.set(turn.sessionId, list);
+
+  // Persist to database
+  dbWriteSafe(() => {
+    dbInsertTurnLog(turn);
+  }, 'logTurn');
 }
 
 export function getTurns(sessionId: string): TurnLog[] {
