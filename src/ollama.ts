@@ -35,3 +35,35 @@ export async function ollamaChat(req: OllamaChatRequest): Promise<OllamaChatResp
 
     return (await res.json()) as OllamaChatResponse;
 }
+
+export type OllamaEmbeddingRequest = {
+  model: string;
+  prompt: string;
+};
+
+export type OllamaEmbeddingResponse = {
+  embedding: number[];
+};
+
+const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL ?? 'nomic-embed-text';
+
+export async function ollamaEmbed(prompt: string): Promise<number[]> {
+  const req: OllamaEmbeddingRequest = {
+    model: EMBEDDING_MODEL,
+    prompt,
+  };
+
+  const res = await fetch(`${OLLAMA_BASE_URL}/api/embeddings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Ollama embeddings error ${res.status}: ${text}`);
+  }
+
+  const data = (await res.json()) as OllamaEmbeddingResponse;
+  return data.embedding;
+}

@@ -65,6 +65,67 @@ export function getMessages(sessionId: SessionId): ChatMessage[] {
   return getOrCreateSession(sessionId).messages;
 }
 
+/**
+ * Returns messages for inference with retrieved context injected.
+ * Priority: System Prompt → Retrieved Context → Conversation History
+ * If retrievedContext is empty, returns normal messages.
+ */
+export function getMessagesWithRetrievedContext(
+  sessionId: SessionId,
+  retrievedContext: string
+): ChatMessage[] {
+  const s = getOrCreateSession(sessionId);
+
+  // If no retrieved context, return normal messages
+  if (!retrievedContext.trim()) {
+    return s.messages;
+  }
+
+  const systemMsg = s.messages[0]; // System prompt (always exists)
+  if (!systemMsg) {
+    // Shouldn't happen, but handle gracefully
+    return s.messages;
+  }
+
+  const historyMsgs = s.messages.slice(1); // User/assistant pairs
+
+  const contextMsg: ChatMessage = {
+    role: 'system',
+    content: retrievedContext,
+  };
+
+  const candidateMessages: ChatMessage[] = [systemMsg, contextMsg, ...historyMsgs];
+
+  // Trim to MAX_CHARS (prioritize recent history)
+  return trimToMaxChars(candidateMessages, MAX_CHARS);
+}
+
+/**
+ * Trim messages to fit within maxChars, keeping system messages and recent history.
+ */
+function trimToMaxChars(msgs: ChatMessage[], maxChars: number): ChatMessage[] {
+  const systemMsgs = msgs.filter((m) => m.role === 'system');
+  const conversationMsgs = msgs.filter((m) => m.role !== 'system');
+
+  let result = [...systemMsgs];
+  let charCount = totalChars(result);
+
+  // Add conversation messages from most recent backwards
+  for (let i = conversationMsgs.length - 1; i >= 0; i--) {
+    const msg = conversationMsgs[i];
+    if (!msg) continue; // Skip if undefined (shouldn't happen)
+
+    if (charCount + msg.content.length <= maxChars) {
+      result.splice(systemMsgs.length, 0, msg); // Insert after system messages
+      charCount += msg.content.length;
+    } else {
+      break; // Can't fit more
+    }
+  }
+
+  return result;
+}
+
 export function addUserMessage(sessionId: SessionId, content: string) {
   const s = getOrCreateSession(sessionId);
   const position = s.messages.length;

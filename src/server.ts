@@ -3,9 +3,13 @@ import Fastify from 'fastify'
 import { registerChatRoutes } from './routes/chat.js'
 import { HttpError } from './lib/http.js';
 import { cleanupExpiredSessions } from './context/store.js';
+import { loadEmbeddingsCache } from './embeddings/cache.js';
 import cors from '@fastify/cors';
 
 setInterval(() => cleanupExpiredSessions(), 60_000);
+
+// Load embeddings cache into memory
+loadEmbeddingsCache();
 
 
 const app = Fastify({ logger: true });

@@ -63,9 +63,73 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_turns_session ON turn_logs(session_id);
   CREATE INDEX IF NOT EXISTS idx_turns_created ON turn_logs(user_at);
   CREATE INDEX IF NOT EXISTS idx_turns_latency ON turn_logs(latency_ms);
+
+  CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    heading TEXT,
+    content TEXT NOT NULL,
+    embedding TEXT NOT NULL,
+    char_count INTEGER NOT NULL,
+    word_count INTEGER NOT NULL,
+    document_type TEXT DEFAULT 'general',
+    created_at INTEGER NOT NULL,
+    UNIQUE(source_file, chunk_index)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_chunks_source ON knowledge_chunks(source_file);
+  CREATE INDEX IF NOT EXISTS idx_chunks_created ON knowledge_chunks(created_at);
+
+  CREATE TABLE IF NOT EXISTS retrieval_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    turn_id TEXT,
+    query TEXT NOT NULL,
+    chunks_retrieved INTEGER NOT NULL,
+    retrieval_latency_ms INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_retrieval_session ON retrieval_logs(session_id);
+  CREATE INDEX IF NOT EXISTS idx_retrieval_turn ON retrieval_logs(turn_id);
 `);
 
 console.log('[DB] Schema initialized');
+
+// Migration: Add document_type column if it doesn't exist
+try {
+  const tableInfo = db.pragma('table_info(knowledge_chunks)') as Array<{ name: string }>;
+  const hasDocumentType = tableInfo.some((col) => col.name === 'document_type');
+
+  if (!hasDocumentType) {
+    console.log('[DB Migration] Adding document_type column to knowledge_chunks...');
+    db.exec(`
+      ALTER TABLE knowledge_chunks ADD COLUMN document_type TEXT DEFAULT 'general';
+      CREATE INDEX IF NOT EXISTS idx_chunks_document_type ON knowledge_chunks(document_type);
+    `);
+    console.log('[DB Migration] Migration complete');
+  }
+} catch (err) {
+  console.error('[DB Migration] Error during migration:', err);
+}
+
+// Migration: Add classification column to retrieval_logs if it doesn't exist
+try {
+  const retrievalTableInfo = db.pragma('table_info(retrieval_logs)') as Array<{ name: string }>;
+  const hasClassification = retrievalTableInfo.some((col) => col.name === 'classification');
+
+  if (!hasClassification) {
+    console.log('[DB Migration] Adding classification column to retrieval_logs...');
+    db.exec(`
+      ALTER TABLE retrieval_logs ADD COLUMN classification TEXT;
+    `);
+    console.log('[DB Migration] Migration complete');
+  }
+} catch (err) {
+  console.error('[DB Migration] Error during migration:', err);
+}
 
 // Graceful shutdown
 process.on('exit', () => db.close());
